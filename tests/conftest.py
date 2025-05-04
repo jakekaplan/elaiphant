@@ -68,7 +68,7 @@ def temporary_settings(**kwargs):
             )
             raise
 
-        for field in global_settings.model_fields:
+        for field in Settings.model_fields:
             try:
                 object.__setattr__(
                     global_settings, field, getattr(new_settings_instance, field)
@@ -90,7 +90,7 @@ def temporary_settings(**kwargs):
             elif key in os.environ:
                 del os.environ[key]
 
-        for field in global_settings.model_fields:
+        for field in Settings.model_fields:
             try:
                 object.__setattr__(
                     global_settings, field, getattr(old_settings_state, field)
