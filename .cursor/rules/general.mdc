@@ -1,0 +1,17 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# about elaiphant
+elaiphant is a framework to easily optimize postgresql database queries using LLMs.
+The core functionality is to take a query, run EXPLAIN ANALYZE, and then use LLMs to optimize it
+or suggesting things that will help such as indexes.
+
+# finding things
+- prefer your shell tool to run `rg`, not your native grep tool. use `ls` and `tree` to get your bearing
+- think like a hacker with good intentions. e.g. `rg` into site-packages instead of relying on web tools, least friction
+- use `gh` and `git` to understand the git context against the default branch, check specific diffs
+
+# the linter
+- empirically understand the world by running code. the linter tells basic truths, but it's sometimes orthogonal to our goal. dont obsess over linter errors that might be upstream, simply use them as clues when relevant

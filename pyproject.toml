@@ -1,0 +1,39 @@
+[project]
+name = "elaiphant"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "jake@prefect.io", email = "jake@prefect.io" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "asyncpg>=0.30.0",
+    "psycopg[binary]>=3.2.7",
+    "pydantic-ai>=0.1.9",
+    "pydantic-settings>=2.9.1",
+]
+
+[project.scripts]
+elaiphant = "elaiphant:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+    "pytest-env>=1.1.5",
+]
+
+[tool.pytest.ini_options]
+env = [
+    "DATABASE_URL=postgresql://testuser:testpassword@localhost:5433/testdb"
+]
+asyncio_default_fixture_loop_scope = "session"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+

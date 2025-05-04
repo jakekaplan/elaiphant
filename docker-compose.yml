@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  postgres_test_db:
+    image: postgres:16
+    container_name: elaiphant_postgres_test
+    environment:
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpassword
+      POSTGRES_DB: testdb
+    ports:
+      # Map host port 5433 to container port 5432 to avoid conflicts
+      - "5433:5432"
+    volumes:
+      # Optional: Persist data between runs (useful for dev, less for CI)
+      - postgres_test_data:/var/lib/postgresql/data
+    # Add a healthcheck to ensure the DB is ready before tests connect
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_test_data:
+    driver: local 

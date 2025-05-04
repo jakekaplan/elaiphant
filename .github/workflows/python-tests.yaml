@@ -1,0 +1,80 @@
+---
+name: Python Tests
+
+env:
+  PY_COLORS: 1
+
+"on":
+  pull_request:
+    paths:
+      - .github/workflows/python-tests.yaml
+      - "**/*.py"
+      - pyproject.toml
+      - uv.lock
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/python-tests.yaml
+      - "**/*.py"
+      - pyproject.toml
+      - uv.lock
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  run_unit_tests:
+    name: "Unit tests"
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+
+    services:
+      postgres_test_db:
+        image: postgres:16
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: testdb
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    strategy:
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.26"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install Project
+        run: uv sync --all-extras --dev
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql://testuser:testpassword@localhost:5433/testdb
+        run: uv run pytest tests
