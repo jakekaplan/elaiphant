@@ -10,7 +10,8 @@ requires-python = ">=3.12"
 dependencies = [
     "asyncpg>=0.30.0",
     "psycopg[binary]>=3.2.7",
-    "pydantic-ai>=0.1.9",
+    "pydantic>=2.11.4",
+    "pydantic-ai[open-ai]>=0.1.9",
     "pydantic-settings>=2.9.1",
 ]
 

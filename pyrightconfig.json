@@ -1,6 +1,6 @@
 {
     "include": [
-        "src/elaiphant"
+        "src/elaiphwant"
     ],
     "typeCheckingMode": "strict",
     "strictListInference": true,
