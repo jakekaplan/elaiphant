@@ -33,10 +33,10 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      postgres_test_db:
-        image: postgres:16
+      postgres:
+        image: postgres:14.15
         env:
-          POSTGRES_USER: testuser
+          POSTGRES_USER: runner
           POSTGRES_PASSWORD: testpassword
           POSTGRES_DB: testdb
         ports:
