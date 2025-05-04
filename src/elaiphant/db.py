@@ -1,7 +1,9 @@
 import psycopg
 import logging
-# Removed TypeAlias
-from typing import Optional, List, Dict, Any, Tuple
+from psycopg import rows
+from psycopg.sql import SQL
+from typing import Optional, List, Dict, Any, Tuple, Iterator, cast
+from typing_extensions import LiteralString
 from contextlib import contextmanager
 
 from elaiphant.settings import settings
@@ -11,19 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 @contextmanager
-def get_db_connection() -> psycopg.Connection:
+def get_db_connection() -> Iterator[psycopg.Connection]:
     """Provides a transactional database connection context."""
     if not settings.database_url:
         raise ConnectionError("Database URL is not configured.")
 
-    # Ensure the DSN is a string for psycopg.connect
     dsn = str(settings.database_url)
     conn: Optional[psycopg.Connection] = None
     try:
         conn = psycopg.connect(dsn)
         yield conn
-        # Commit only if connection is valid and no error occurred before yield returned
-        if conn: # Check explicitly for None
+        if conn:
             conn.commit()
     except psycopg.Error as e:
         logger.error(f"Database operation failed: {e}")
@@ -34,24 +34,25 @@ def get_db_connection() -> psycopg.Connection:
         if conn:
             conn.close()
 
+
 def execute_query(
     sql: str, params: Optional[Tuple[Any, ...]] = None
 ) -> List[Dict[str, Any]]:
     """Executes a SQL query and returns results as a list of dicts."""
-    logger.info(f"Executing query: {sql}" + (f" with params: {params}" if params else ""))
+    logger.info(
+        f"Executing query: {sql}" + (f" with params: {params}" if params else "")
+    )
     results: List[Dict[str, Any]] = []
     try:
         with get_db_connection() as conn:
-            # Use server-side cursors for potentially large results if needed,
-            # but start with standard cursors for simplicity.
-            with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-                cur.execute(sql, params)
-                # Check if the query returns rows
+            with conn.cursor(row_factory=rows.dict_row) as cur:
+                cur.execute(SQL(cast(LiteralString, sql)), params)
                 if cur.description:
                     results = cur.fetchall()
                 else:
-                    logger.info(f"Query executed successfully, no rows returned (Status: {cur.statusmessage}).")
-                    # Ensure empty list has the correct type annotation if needed by linter
+                    logger.info(
+                        f"Query executed successfully, no rows returned (Status: {cur.statusmessage})."
+                    )
                     results = []
     except psycopg.Error as e:
         # Error is logged in get_db_connection context manager, re-raise it
@@ -59,18 +60,25 @@ def execute_query(
         raise
     return results
 
+
 # Keep more specific type hint for EXPLAIN ANALYZE result
 def get_explain_analyze(
     sql: str, params: Optional[Tuple[Any, ...]] = None
 ) -> List[Dict[str, List[Dict[str, Any]]]]:
     """Executes EXPLAIN ANALYZE (FORMAT JSON) and returns the plan."""
-    # Use JSON format for easier parsing
-    explain_sql = f"EXPLAIN (ANALYZE, VERBOSE, BUFFERS, FORMAT JSON) {sql}"
-    logger.info(f"Executing explain: {explain_sql}" + (f" with params: {params}" if params else ""))
+    explain_template = SQL(
+        cast(LiteralString, "EXPLAIN (ANALYZE, VERBOSE, BUFFERS, FORMAT JSON) {}")
+    )
+    explain_sql = explain_template.format(SQL(cast(LiteralString, sql)))
+    # Simplified logging: Log the original SQL query being explained
+    logger.info(
+        f"Getting EXPLAIN ANALYZE for: {sql}"
+        + (f" with params: {params}" if params else "")
+    )
     plan: List[Dict[str, List[Dict[str, Any]]]] = []
     try:
         with get_db_connection() as conn:
-            with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            with conn.cursor(row_factory=rows.dict_row) as cur:
                 cur.execute(explain_sql, params)
                 # EXPLAIN ANALYZE should always return rows if successful
                 fetched_plan = cur.fetchall()
@@ -85,4 +93,4 @@ def get_explain_analyze(
         logger.error(f"Failed to execute EXPLAIN ANALYZE for query: {sql}. Error: {e}")
         raise
     # The result is typically a list containing one dictionary: [{'QUERY PLAN': [...]}]
-    return plan 
+    return plan

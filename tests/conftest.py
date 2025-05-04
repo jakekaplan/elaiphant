@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
+
 @pytest.fixture(scope="session")
 def base_postgres_url() -> str:
     """Gets the base DB connection URL from environment (set by pyproject.toml)."""
@@ -20,27 +21,32 @@ def base_postgres_url() -> str:
         )
     return url
 
+
 @pytest.fixture(scope="session")
 def pg_host(base_postgres_url: str) -> str:
     return urlsplit(base_postgres_url).hostname
 
+
 @pytest.fixture(scope="session")
 def pg_port(base_postgres_url: str) -> int:
-    # urlsplit port can be None, provide default
     return urlsplit(base_postgres_url).port or 5432
+
 
 @pytest.fixture(scope="session")
 def pg_user(base_postgres_url: str) -> str:
     return urlsplit(base_postgres_url).username
 
+
 @pytest.fixture(scope="session")
 def pg_password(base_postgres_url: str) -> str:
     return urlsplit(base_postgres_url).password
 
+
 @pytest_asyncio.fixture(scope="session")
-async def _postgres_service(pg_host: str, pg_port: int, pg_user: str, pg_password: str) -> None:
+async def _postgres_service(
+    pg_host: str, pg_port: int, pg_user: str, pg_password: str
+) -> None:
     """Check if the postgres service is available."""
-    # Connect to the default 'postgres' database to check availability
     dsn = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/postgres"
     try:
         conn = await asyncpg.connect(dsn=dsn, timeout=5)
@@ -52,9 +58,10 @@ async def _postgres_service(pg_host: str, pg_port: int, pg_user: str, pg_passwor
             f"Ensure the Docker container is running and healthy. Error: {e}"
         )
 
+
 @pytest_asyncio.fixture(scope="session")
 async def session_test_db_url(
-    _postgres_service: None, # Depends on the service check
+    _postgres_service: None,
     pg_host: str,
     pg_port: int,
     pg_user: str,
@@ -66,15 +73,16 @@ async def session_test_db_url(
     """
     db_name = f"test_db_{uuid.uuid4().hex[:8]}"
     test_db_url = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{db_name}"
-    postgres_db_url = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/postgres"
+    postgres_db_url = (
+        f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/postgres"
+    )
 
     conn = None
     try:
-        # Connect to the default 'postgres' database to manage test DBs
         conn = await asyncpg.connect(dsn=postgres_db_url)
         logger.info(f"Attempting to create test database: {db_name}")
-        await conn.execute(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)') # Use FORCE if needed and available
-        await conn.execute(f'CREATE DATABASE "{db_name}"' )
+        await conn.execute(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)')
+        await conn.execute(f'CREATE DATABASE "{db_name}"')
         logger.info(f"Successfully created test database: {db_name}")
     except Exception as e:
         pytest.fail(f"Failed to create test database '{db_name}'. Error: {e}")
@@ -82,26 +90,23 @@ async def session_test_db_url(
         if conn:
             await conn.close()
 
-    # --- Test Session Runs ---
     yield test_db_url
-    # --- Test Session Runs ---
 
-    # Teardown: Drop the test database
     conn = None
     try:
         conn = await asyncpg.connect(dsn=postgres_db_url)
         logger.info(f"Attempting to drop test database: {db_name}")
-        # Terminate connections before dropping - important!
-        # Use IF EXISTS for robustness in termination query
-        await conn.execute(f"""
+        await conn.execute(
+            """
             SELECT pg_terminate_backend(pid)
             FROM pg_stat_activity
             WHERE datname = $1 AND pid <> pg_backend_pid();
-            """, db_name)
-        await conn.execute(f'DROP DATABASE IF EXISTS "{db_name}"' )
+            """,
+            db_name,
+        )
+        await conn.execute(f'DROP DATABASE IF EXISTS "{db_name}"')
         logger.info(f"Successfully dropped test database: {db_name}")
     except Exception as e:
-        # Log error but don't fail the entire test suite run if cleanup fails
         logger.error(f"Failed to drop test database '{db_name}'. Error: {e}")
     finally:
         if conn:
@@ -118,38 +123,37 @@ def override_database_url(session_test_db_url: str) -> None:
     logger.info(f"Overriding DATABASE_URL for session: {session_test_db_url}")
     os.environ["DATABASE_URL"] = session_test_db_url
 
-    # Force reload of the settings module AFTER the env var is set.
     try:
         import importlib
         import elaiphant.settings
+
         importlib.reload(elaiphant.settings)
         logger.info("Reloaded elaiphant.settings module.")
-        # Verify the reloaded settings picked up the change
         from elaiphant.settings import settings
+
         reloaded_url_str = str(settings.database_url)
         if reloaded_url_str != session_test_db_url:
-             logger.warning(
-                 f"Reloaded settings URL ({reloaded_url_str}) does not match "
-                 f"session DB URL ({session_test_db_url}). Check import timing."
-             )
+            logger.warning(
+                f"Reloaded settings URL ({reloaded_url_str}) does not match "
+                f"session DB URL ({session_test_db_url}). Check import timing."
+            )
 
     except ImportError:
         logger.error("Failed to reload elaiphant.settings.")
-        pass # Module probably not loaded yet, which is fine.
+        pass
 
-    yield # Run tests
+    yield
 
-    # Restore original environment variable
     logger.info("Restoring original DATABASE_URL.")
     if original_url is None:
         if "DATABASE_URL" in os.environ:
-             del os.environ["DATABASE_URL"]
+            del os.environ["DATABASE_URL"]
     else:
         os.environ["DATABASE_URL"] = original_url
-    # Optionally reload settings again if needed
-    # try:
-    #     import importlib
-    #     import elaiphant.settings
-    #     importlib.reload(elaiphant.settings)
-    # except ImportError:
-    #     pass 
+
+
+# --- Fixture for Per-Test Cleanup (Optional but Recommended) ---
+# @pytest_asyncio.fixture(scope="function", autouse=True)
+# async def cleanup_db_tables(session_test_db_url: str):
+#     """Truncates all user tables in the test database before each test."""
+#     # ... implementation remains commented out ...

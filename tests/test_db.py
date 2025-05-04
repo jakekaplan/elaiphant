@@ -4,16 +4,16 @@ import psycopg
 
 from elaiphant.db import execute_query, get_explain_analyze, get_db_connection
 
+
 def test_execute_query_select_1():
     """should execute a simple SELECT query correctly."""
-    # This now runs against the temporary session database
     results = execute_query("SELECT 1 AS number;")
     assert len(results) == 1
     assert results[0]["number"] == 1
 
+
 def test_execute_query_no_results():
     """should handle queries that return no rows."""
-    # This now runs against the temporary session database
     try:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
@@ -23,7 +23,10 @@ def test_execute_query_no_results():
                 results = cur.fetchall()
                 assert results == []
     except (psycopg.Error, ConnectionError) as e:
-        pytest.fail(f"Database operation failed during test_execute_query_no_results: {e}")
+        pytest.fail(
+            f"Database operation failed during test_execute_query_no_results: {e}"
+        )
+
 
 def test_execute_query_with_params():
     """should execute a query with parameters correctly."""
@@ -31,18 +34,17 @@ def test_execute_query_with_params():
     assert len(results) == 1
     assert results[0]["value"] == "hello"
 
+
 def test_get_explain_analyze_basic():
     """should retrieve an EXPLAIN ANALYZE plan in JSON format."""
     plan_result = get_explain_analyze("SELECT 1;")
-    # Result is a list containing one dict: [{'QUERY PLAN': [...]}]
     assert isinstance(plan_result, list)
     assert len(plan_result) == 1
     assert isinstance(plan_result[0], dict)
-    # Check that the key 'QUERY PLAN' exists (standard for FORMAT JSON output)
     assert "QUERY PLAN" in plan_result[0]
-    # Check that the value associated with 'QUERY PLAN' is a list (the actual plan nodes)
     assert isinstance(plan_result[0]["QUERY PLAN"], list)
-    assert len(plan_result[0]["QUERY PLAN"]) > 0 # Should have at least one plan node
+    assert len(plan_result[0]["QUERY PLAN"]) > 0
+
 
 def test_get_explain_analyze_with_params():
     """should retrieve an EXPLAIN ANALYZE plan for a query with parameters."""
