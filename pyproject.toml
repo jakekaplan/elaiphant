@@ -34,7 +34,7 @@ dev = [
 
 [tool.pytest.ini_options]
 env = [
-    "DATABASE_URL=postgresql://testuser:testpassword@localhost:5433/testdb"
+    "ELAIPHANT_DATABASE_URL=postgresql://testuser:testpassword@localhost:5433/testdb"
 ]
 asyncio_default_fixture_loop_scope = "session"
 asyncio_mode = "auto"

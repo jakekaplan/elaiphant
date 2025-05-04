@@ -13,10 +13,10 @@ logger = logging.getLogger(__name__)
 @pytest.fixture(scope="session")
 def base_postgres_url() -> str:
     """Gets the base DB connection URL from environment (set by pyproject.toml)."""
-    url = os.environ.get("DATABASE_URL")
+    url = os.environ.get("ELAIPHANT_DATABASE_URL")
     if not url:
         pytest.fail(
-            "DATABASE_URL environment variable not set."
+            "ELAIPHANT_DATABASE_URL environment variable not set."
             " Ensure it's configured in pyproject.toml [tool.pytest.ini_options].env"
         )
     return url
@@ -116,12 +116,13 @@ async def session_test_db_url(
 @pytest.fixture(scope="session", autouse=True)
 def override_database_url(session_test_db_url: str) -> None:
     """
-    Overrides the DATABASE_URL environment variable for the entire test session
+    Overrides the ELAIPHANT_DATABASE_URL environment variable for the entire test session
     to point to the temporary database created by session_test_db_url.
     """
-    original_url = os.environ.get("DATABASE_URL")
-    logger.info(f"Overriding DATABASE_URL for session: {session_test_db_url}")
-    os.environ["DATABASE_URL"] = session_test_db_url
+    env_var_name = "ELAIPHANT_DATABASE_URL"
+    original_url = os.environ.get(env_var_name)
+    logger.info(f"Overriding {env_var_name} for session: {session_test_db_url}")
+    os.environ[env_var_name] = session_test_db_url
 
     try:
         import importlib
@@ -137,19 +138,18 @@ def override_database_url(session_test_db_url: str) -> None:
                 f"Reloaded settings URL ({reloaded_url_str}) does not match "
                 f"session DB URL ({session_test_db_url}). Check import timing."
             )
-
     except ImportError:
         logger.error("Failed to reload elaiphant.settings.")
         pass
 
     yield
 
-    logger.info("Restoring original DATABASE_URL.")
+    logger.info(f"Restoring original {env_var_name}.")
     if original_url is None:
-        if "DATABASE_URL" in os.environ:
-            del os.environ["DATABASE_URL"]
+        if env_var_name in os.environ:
+            del os.environ[env_var_name]
     else:
-        os.environ["DATABASE_URL"] = original_url
+        os.environ[env_var_name] = original_url
 
 
 # --- Fixture for Per-Test Cleanup (Optional but Recommended) ---
