@@ -55,13 +55,11 @@ def execute_query(
                     )
                     results = []
     except psycopg.Error as e:
-        # Error is logged in get_db_connection context manager, re-raise it
         logger.error(f"Failed to execute query: {sql}. Error: {e}")
         raise
     return results
 
 
-# Keep more specific type hint for EXPLAIN ANALYZE result
 def get_explain_analyze(
     sql: str, params: Optional[Tuple[Any, ...]] = None
 ) -> List[Dict[str, List[Dict[str, Any]]]]:
@@ -70,27 +68,26 @@ def get_explain_analyze(
         cast(LiteralString, "EXPLAIN (ANALYZE, VERBOSE, BUFFERS, FORMAT JSON) {}")
     )
     explain_sql = explain_template.format(SQL(cast(LiteralString, sql)))
-    # Simplified logging: Log the original SQL query being explained
+
     logger.info(
         f"Getting EXPLAIN ANALYZE for: {sql}"
         + (f" with params: {params}" if params else "")
     )
     plan: List[Dict[str, List[Dict[str, Any]]]] = []
+
     try:
         with get_db_connection() as conn:
             with conn.cursor(row_factory=rows.dict_row) as cur:
                 cur.execute(explain_sql, params)
-                # EXPLAIN ANALYZE should always return rows if successful
+
                 fetched_plan = cur.fetchall()
                 if not fetched_plan:
-                    # This case might indicate an issue with the query itself
-                    # before execution plan generation, or an unexpected PG response.
                     logger.error(f"EXPLAIN ANALYZE for query '{sql}' returned no plan.")
                     raise psycopg.Error("EXPLAIN ANALYZE did not return any plan.")
-                # Assign fetched plan; type checker should see it matches ExplainAnalyzeResult
+
                 plan = fetched_plan
     except psycopg.Error as e:
         logger.error(f"Failed to execute EXPLAIN ANALYZE for query: {sql}. Error: {e}")
         raise
-    # The result is typically a list containing one dictionary: [{'QUERY PLAN': [...]}]
+
     return plan
