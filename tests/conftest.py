@@ -8,6 +8,8 @@ from urllib.parse import urlsplit
 import psycopg
 from elaiphant.db import get_db_connection
 from typing import Iterator, AsyncIterator
+from contextlib import contextmanager
+from elaiphant.settings import settings as global_settings, Settings
 
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,62 @@ def pg_password(base_postgres_url: str) -> str:
     return urlsplit(base_postgres_url).password
 
 
+@contextmanager
+def temporary_settings(**kwargs):
+    """Temporarily override elaiphant setting values by mutating the global object."""
+    old_env = os.environ.copy()
+    old_settings_state = global_settings.model_copy(deep=True)
+
+    try:
+        for setting_key, value in kwargs.items():
+            if value is not None:
+                os.environ[setting_key] = str(value)
+            else:
+                os.environ.pop(setting_key, None)
+
+        try:
+            new_settings_instance = Settings()
+        except Exception as e:
+            logger.error(
+                f"Error creating new Settings instance during temporary_settings: {e}"
+            )
+            raise
+
+        for field in global_settings.model_fields:
+            try:
+                object.__setattr__(
+                    global_settings, field, getattr(new_settings_instance, field)
+                )
+            except AttributeError:
+                logger.warning(f"Could not sync field '{field}' in temporary_settings")
+                pass
+
+        logger.debug(f"temporary_settings applied: {kwargs}")
+        yield global_settings
+
+    finally:
+        logger.debug("Restoring settings after temporary_settings")
+
+        for key in kwargs:
+            original_value = old_env.get(key)
+            if original_value is not None:
+                os.environ[key] = original_value
+            elif key in os.environ:
+                del os.environ[key]
+
+        for field in global_settings.model_fields:
+            try:
+                object.__setattr__(
+                    global_settings, field, getattr(old_settings_state, field)
+                )
+            except AttributeError:
+                logger.warning(
+                    f"Could not restore field '{field}' in temporary_settings"
+                )
+                pass
+        logger.debug("Settings restoration complete.")
+
+
 @pytest_asyncio.fixture(scope="function")
 async def function_test_db_url(
     pg_host: str,
@@ -77,6 +135,7 @@ async def function_test_db_url(
 
     yield test_db_url
 
+    # Cleanup: Runs after the test function finishes
     conn = None
     try:
         conn = await asyncpg.connect(dsn=postgres_db_url)
@@ -101,41 +160,13 @@ async def function_test_db_url(
 @pytest.fixture(scope="function")
 def override_database_url_for_function(function_test_db_url: str) -> Iterator[None]:
     """
-    Overrides the ELAIPHANT_DATABASE_URL environment variable for a single test function
-    to point to the temporary database created by function_test_db_url.
-    Reloads settings.
+    Overrides the ELAIPHANT_DATABASE_URL for a single test function using temporary_settings.
     """
-    env_var_name = "ELAIPHANT_DATABASE_URL"
-    original_url = os.environ.get(env_var_name)
-    logger.info(f"[Function Scope] Overriding {env_var_name}: {function_test_db_url}")
-    os.environ[env_var_name] = function_test_db_url
-
-    try:
-        import importlib
-        import elaiphant.settings
-
-        importlib.reload(elaiphant.settings)
-        logger.info("[Function Scope] Reloaded elaiphant.settings module.")
-        from elaiphant.settings import settings
-
-        reloaded_url_str = str(settings.database_url)
-        if reloaded_url_str != function_test_db_url:
-            logger.warning(
-                f"Reloaded settings URL ({reloaded_url_str}) does not match "
-                f"function DB URL ({function_test_db_url}). Check import timing."
-            )
-    except ImportError:
-        logger.error("[Function Scope] Failed to reload elaiphant.settings.")
-        pass
-
-    yield
-
-    logger.info(f"[Function Scope] Restoring original {env_var_name}.")
-    if original_url is None:
-        if env_var_name in os.environ:
-            del os.environ[env_var_name]
-    else:
-        os.environ[env_var_name] = original_url
+    settings_override = {"ELAIPHANT_DATABASE_URL": function_test_db_url}
+    logger.info(f"[Function Scope] Applying temporary settings: {settings_override}")
+    with temporary_settings(**settings_override):
+        yield
+    logger.info("[Function Scope] Restored settings after override.")
 
 
 @pytest.fixture(scope="function")

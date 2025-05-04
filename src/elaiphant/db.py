@@ -1,13 +1,12 @@
 import psycopg
 import logging
-import importlib
 from psycopg import rows
 from psycopg.sql import SQL
 from typing import Optional, List, Dict, Any, Tuple, Iterator, cast
 from typing_extensions import LiteralString
 from contextlib import contextmanager
 
-import elaiphant.settings
+from elaiphant.settings import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,26 +15,17 @@ logger = logging.getLogger(__name__)
 @contextmanager
 def get_db_connection() -> Iterator[psycopg.Connection]:
     """Provides a transactional database connection context."""
-    try:
-        current_settings = importlib.reload(elaiphant.settings).settings
-    except Exception as e:
-        logger.error(f"Failed to reload settings: {e}")
-        current_settings = elaiphant.settings.settings
-
-    if not current_settings.database_url:
+    if not settings.database_url:
         raise ConnectionError("Database URL is not configured.")
 
-    dsn = str(current_settings.database_url)
+    dsn = str(settings.database_url)
     logger.debug(f"Attempting connection using DSN: {dsn}")
     conn: Optional[psycopg.Connection] = None
     try:
         conn = psycopg.connect(dsn)
-        # Assert conn is not None to satisfy linter, though connect() would raise if failed
         assert conn is not None
         logger.debug(f"Connection successful to: {conn.info.dbname}")
         yield conn
-        # Improved commit/rollback logic
-        # Check conn is not None here because yield could raise before commit/rollback
         if conn and not conn.closed:
             if conn.info.transaction_status == psycopg.pq.TransactionStatus.IDLE:
                 try:
@@ -78,24 +68,34 @@ def get_db_connection() -> Iterator[psycopg.Connection]:
 
 
 def execute_query(
-    sql: str, params: Optional[Tuple[Any, ...]] = None
+    sql: str,
+    params: Optional[Tuple[Any, ...]] = None,
+    conn: Optional[psycopg.Connection] = None,
 ) -> List[Dict[str, Any]]:
-    """Executes a SQL query and returns results as a list of dicts."""
+    """Executes a SQL query. Uses provided connection or creates a new one."""
     logger.info(
         f"Executing query: {sql}" + (f" with params: {params}" if params else "")
     )
     results: List[Dict[str, Any]] = []
+
+    def _fetch_results(cursor: psycopg.Cursor[rows.DictRow]) -> List[Dict[str, Any]]:
+        cursor.execute(SQL(cast(LiteralString, sql)), params)
+        if cursor.description:
+            return cursor.fetchall()
+        else:
+            logger.info(
+                f"Query executed successfully, no rows returned (Status: {cursor.statusmessage})."
+            )
+            return []
+
     try:
-        with get_db_connection() as conn:
+        if conn:
             with conn.cursor(row_factory=rows.dict_row) as cur:
-                cur.execute(SQL(cast(LiteralString, sql)), params)
-                if cur.description:
-                    results = cur.fetchall()
-                else:
-                    logger.info(
-                        f"Query executed successfully, no rows returned (Status: {cur.statusmessage})."
-                    )
-                    results = []
+                results = _fetch_results(cur)
+        else:
+            with get_db_connection() as new_conn:
+                with new_conn.cursor(row_factory=rows.dict_row) as cur:
+                    results = _fetch_results(cur)
     except psycopg.Error as e:
         logger.error(f"Failed to execute query: {sql}. Error: {e}")
         raise
@@ -103,9 +103,11 @@ def execute_query(
 
 
 def get_explain_analyze(
-    sql: str, params: Optional[Tuple[Any, ...]] = None
+    sql: str,
+    params: Optional[Tuple[Any, ...]] = None,
+    conn: Optional[psycopg.Connection] = None,
 ) -> List[Dict[str, List[Dict[str, Any]]]]:
-    """Executes EXPLAIN ANALYZE (FORMAT JSON) and returns the plan."""
+    """Executes EXPLAIN ANALYZE. Uses provided connection or creates a new one."""
     explain_template = SQL(
         cast(LiteralString, "EXPLAIN (ANALYZE, VERBOSE, BUFFERS, FORMAT JSON) {}")
     )
@@ -117,22 +119,67 @@ def get_explain_analyze(
     )
     plan: List[Dict[str, List[Dict[str, Any]]]] = []
 
+    def _fetch_plan(
+        cursor: psycopg.Cursor[rows.DictRow],
+    ) -> List[Dict[str, List[Dict[str, Any]]]]:
+        cursor.execute(explain_sql, params)
+        fetched_plan = cursor.fetchall()
+        if not fetched_plan:
+            logger.error(f"EXPLAIN ANALYZE for query '{sql}' returned no plan.")
+            raise psycopg.Error("EXPLAIN ANALYZE did not return any plan.")
+        return fetched_plan
+
     try:
-        with get_db_connection() as conn:
+        if conn:
             with conn.cursor(row_factory=rows.dict_row) as cur:
-                cur.execute(explain_sql, params)
-
-                fetched_plan = cur.fetchall()
-                if not fetched_plan:
-                    logger.error(f"EXPLAIN ANALYZE for query '{sql}' returned no plan.")
-                    raise psycopg.Error("EXPLAIN ANALYZE did not return any plan.")
-
-                plan = fetched_plan
+                plan = _fetch_plan(cur)
+        else:
+            with get_db_connection() as new_conn:
+                with new_conn.cursor(row_factory=rows.dict_row) as cur:
+                    plan = _fetch_plan(cur)
     except psycopg.Error as e:
         logger.error(f"Failed to execute EXPLAIN ANALYZE for query: {sql}. Error: {e}")
         raise
 
     return plan
+
+
+def get_explain_analyze_refined(
+    sql: str,
+    params: Optional[Tuple[Any, ...]] = None,
+    conn: Optional[psycopg.Connection] = None,
+) -> List[Dict[str, Any]]:
+    """Executes EXPLAIN ANALYZE (FORMAT JSON). Uses provided connection or creates a new one."""
+    explain_template = SQL(
+        cast(LiteralString, "EXPLAIN (ANALYZE, VERBOSE, BUFFERS, FORMAT JSON) {}")
+    )
+    explain_sql = explain_template.format(SQL(cast(LiteralString, sql)))
+    logger.info(
+        f"Getting EXPLAIN ANALYZE JSON for: {sql}"
+        + (f" with params: {params}" if params else "")
+    )
+    plan_result: List[Dict[str, Any]] = []
+
+    def _fetch_plan_json(cursor: psycopg.Cursor[rows.DictRow]) -> List[Dict[str, Any]]:
+        cursor.execute(explain_sql, params)
+        fetched_plan = cursor.fetchall()
+        if not fetched_plan or not fetched_plan[0]:
+            logger.error(f"EXPLAIN ANALYZE for query '{sql}' returned no plan data.")
+            raise psycopg.Error("EXPLAIN ANALYZE did not return any plan data.")
+        return fetched_plan
+
+    try:
+        if conn:
+            with conn.cursor(row_factory=rows.dict_row) as cur:
+                plan_result = _fetch_plan_json(cur)
+        else:
+            with get_db_connection() as new_conn:
+                with new_conn.cursor(row_factory=rows.dict_row) as cur:
+                    plan_result = _fetch_plan_json(cur)
+    except psycopg.Error as e:
+        logger.error(f"Failed to execute EXPLAIN ANALYZE for query: {sql}. Error: {e}")
+        raise
+    return plan_result
 
 
 def list_tables(conn: Optional[psycopg.Connection] = None) -> List[str]:
@@ -148,11 +195,9 @@ def list_tables(conn: Optional[psycopg.Connection] = None) -> List[str]:
 
     try:
         if conn:
-            # Use the provided connection's cursor
             with conn.cursor() as cur:
                 table_names = _fetch_tables(cur)
         else:
-            # Create a new connection context
             with get_db_connection() as new_conn:
                 with new_conn.cursor() as cur:
                     table_names = _fetch_tables(cur)
