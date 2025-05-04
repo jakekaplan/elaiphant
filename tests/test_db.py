@@ -66,8 +66,6 @@ def test_list_tables(db_connection: psycopg.Connection):
     """Should list tables created in the public schema."""
     table_name = "test_list_table"
     with db_connection.cursor() as cur:
-        # Relying on function_test_db_url fixture for clean DB
-        # cur.execute(f"DROP TABLE IF EXISTS {table_name};")
         cur.execute(f"CREATE TABLE {table_name} (id serial primary key);")
 
     tables = list_tables(conn=db_connection)
@@ -78,8 +76,6 @@ def test_get_table_schema(db_connection: psycopg.Connection):
     """Should retrieve the correct schema for a given table."""
     table_name = "test_schema_table"
     with db_connection.cursor() as cur:
-        # Relying on function_test_db_url fixture for clean DB
-        # cur.execute(f"DROP TABLE IF EXISTS {table_name};")
         cur.execute(
             f"CREATE TABLE {table_name} (id serial primary key, name text, value integer);"
         )
@@ -93,11 +89,7 @@ def test_get_table_indexes(db_connection: psycopg.Connection):
     table_name = "test_index_table"
     index_name = "idx_test_index_table_name"
     with db_connection.cursor() as cur:
-        # Relying on function_test_db_url fixture for clean DB
-        # cur.execute(f"DROP TABLE IF EXISTS {table_name};")
-        # Create table with a primary key (which creates an index)
         cur.execute(f"CREATE TABLE {table_name} (id serial primary key, name text);")
-        # Create another index
         cur.execute(f"CREATE INDEX {index_name} ON {table_name} (name);")
 
     indexes = get_table_indexes(table_name, conn=db_connection)
